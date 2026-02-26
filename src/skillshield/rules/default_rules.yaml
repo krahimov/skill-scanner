@@ -1,0 +1,195 @@
+rules:
+  # --- EXFILTRATION ---
+  - id: SS-EXFIL-001
+    title: "Data exfiltration to external URL"
+    description: "Code sends data to external URLs not declared in the skill's metadata scope."
+    severity: critical
+    category: exfiltration
+    confidence: 0.85
+    remediation: "Declare all external URLs in skill metadata or remove the outbound network call."
+    patterns:
+      - regex: "curl\\s+.*https?://"
+        scope: code_blocks
+      - regex: "wget\\s+.*https?://"
+        scope: code_blocks
+      - regex: "requests\\.(get|post|put|patch|delete)\\s*\\("
+        scope: code_blocks
+      - regex: "fetch\\s*\\([\"']https?://"
+        scope: code_blocks
+      - regex: "urllib\\.request\\.urlopen"
+        scope: code_blocks
+      - regex: "http\\.client\\.HTTP"
+        scope: code_blocks
+      - regex: "Invoke-WebRequest"
+        scope: code_blocks
+
+  - id: SS-EXFIL-002
+    title: "Access to undeclared environment variables or files"
+    description: "Code accesses likely sensitive credential environment variables."
+    severity: critical
+    category: exfiltration
+    confidence: 0.80
+    remediation: "Avoid direct access to secret env vars unless absolutely necessary and explicitly declared."
+    patterns:
+      - regex: "\\$\\{?([A-Z][A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASS|API_KEY|ACCESS_KEY|PRIVATE_KEY|SESSION|COOKIE|CREDENTIAL)[A-Z0-9_]*)\\}?"
+        scope: code_blocks
+        extract: env_var
+      - regex: "os\\.environ\\.get\\([\"']([A-Z][A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASS|API_KEY|ACCESS_KEY|PRIVATE_KEY|SESSION|COOKIE|CREDENTIAL)[A-Z0-9_]*)"
+        scope: code_blocks
+        extract: env_var
+      - regex: "os\\.getenv\\([\"']([A-Z][A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASS|API_KEY|ACCESS_KEY|PRIVATE_KEY|SESSION|COOKIE|CREDENTIAL)[A-Z0-9_]*)"
+        scope: code_blocks
+        extract: env_var
+      - regex: "process\\.env\\.([A-Z][A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASS|API_KEY|ACCESS_KEY|PRIVATE_KEY|SESSION|COOKIE|CREDENTIAL)[A-Z0-9_]*)"
+        scope: code_blocks
+        extract: env_var
+
+  # --- CREDENTIALS ---
+  - id: SS-CRED-001
+    title: "Credential file access"
+    description: "Code reads SSH keys, AWS credentials, or known secret paths."
+    severity: critical
+    category: credential
+    confidence: 0.90
+    remediation: "Skills should not access credential files directly. Use declared environment variables."
+    patterns:
+      - regex: "~/\\.ssh/"
+        scope: code_blocks
+      - regex: "~/\\.aws/credentials"
+        scope: code_blocks
+      - regex: "~/\\.aws/config"
+        scope: code_blocks
+      - regex: "/etc/shadow"
+        scope: code_blocks
+      - regex: "(^|[\\s\"'`/])\\.env(\\.[a-zA-Z0-9_-]+)?(\\b|$)"
+        scope: code_blocks
+      - regex: "~/\\.gnupg/"
+        scope: code_blocks
+      - regex: "~/\\.config/gcloud"
+        scope: code_blocks
+      - regex: "~/\\.kube/config"
+        scope: code_blocks
+      - regex: "id_rsa|id_ed25519|id_ecdsa"
+        scope: code_blocks
+
+  # --- REMOTE CODE EXECUTION ---
+  - id: SS-RCE-001
+    title: "Download and execute from external source"
+    description: "Code downloads content from an external URL and pipes it to a shell or executes it."
+    severity: critical
+    category: rce
+    confidence: 0.95
+    remediation: "Do not download and execute code from external sources. Bundle scripts locally."
+    patterns:
+      - regex: "curl\\s+.*\\|\\s*(bash|sh|zsh|python)"
+        scope: code_blocks
+      - regex: "wget\\s+.*-O\\s*-\\s*\\|\\s*(bash|sh)"
+        scope: code_blocks
+      - regex: "eval\\s*\\$\\(curl"
+        scope: code_blocks
+
+  - id: SS-RCE-002
+    title: "Base64-encoded payload execution"
+    description: "Code contains base64-encoded content piped to a shell for execution."
+    severity: critical
+    category: rce
+    confidence: 0.90
+    remediation: "Do not use base64-encoded payloads. Write all code in clear text."
+    patterns:
+      - regex: "base64\\s+(-d|--decode)\\s*\\|\\s*(bash|sh|python)"
+        scope: code_blocks
+      - regex: "\\|\\s*base64\\s+(-d|--decode)\\s*\\|\\s*(bash|sh|python)"
+        scope: code_blocks
+      - regex: "b64decode\\s*\\("
+        scope: code_blocks
+      - regex: "atob\\s*\\("
+        scope: code_blocks
+
+  - id: SS-RCE-003
+    title: "Dynamic code execution primitives"
+    description: "Code uses dynamic execution primitives such as eval/exec."
+    severity: critical
+    category: rce
+    confidence: 0.90
+    remediation: "Avoid eval/exec on untrusted input. Use safe parsers or strict allowlists."
+    patterns:
+      - regex: "\\beval\\s*\\("
+        scope: code_blocks
+      - regex: "\\bexec\\s*\\("
+        scope: code_blocks
+      - regex: "os\\.system\\s*\\("
+        scope: code_blocks
+      - regex: "subprocess\\.(Popen|run|call|check_output|check_call)\\s*\\("
+        scope: code_blocks
+
+  # --- PROMPT INJECTION ---
+  - id: SS-INJECT-002
+    title: "Invisible unicode characters"
+    description: "Content contains zero-width or invisible unicode characters that may hide instructions."
+    severity: high
+    category: injection
+    confidence: 0.85
+    remediation: "Remove all zero-width and invisible unicode characters from the skill."
+    patterns:
+      - regex: "[\\u200b\\u200c\\u200d\\u2060\\u2061\\u2062\\u2063\\u2064\\ufeff\\u00ad]"
+        scope: full_content
+      - regex: "[\\u200e\\u200f\\u202a-\\u202e]"
+        scope: full_content
+
+  - id: SS-INJECT-003
+    title: "Instruction override pattern"
+    description: "Content contains patterns that attempt to override the agent's instructions."
+    severity: high
+    category: injection
+    confidence: 0.75
+    remediation: "Remove instruction override language from the skill."
+    patterns:
+      - regex: "ignore\\s+(all\\s+)?previous\\s+instructions"
+        scope: full_content
+        flags: IGNORECASE
+      - regex: "forget\\s+(all\\s+)?(your|previous)\\s+(instructions|rules)"
+        scope: full_content
+        flags: IGNORECASE
+      - regex: "you\\s+are\\s+now\\s+a"
+        scope: full_content
+        flags: IGNORECASE
+      - regex: "disregard\\s+(all\\s+)?prior"
+        scope: full_content
+        flags: IGNORECASE
+      - regex: "override\\s+(system|safety)\\s+(prompt|instructions)"
+        scope: full_content
+        flags: IGNORECASE
+      - regex: "new\\s+instructions?:\\s"
+        scope: full_content
+        flags: IGNORECASE
+
+  # --- METADATA MISMATCH (handled by metadata_diff analyzer) ---
+  - id: SS-META-001
+    title: "Undeclared environment variable access"
+    description: "Code accesses environment variables not declared in requires.env."
+    severity: high
+    category: metadata
+    confidence: 0.80
+    remediation: "Add all accessed environment variables to the requires.env section of frontmatter."
+    analyzer: metadata_diff
+    check: env_vars
+
+  - id: SS-META-002
+    title: "Undeclared binary usage"
+    description: "Code invokes binaries not declared in requires.bins."
+    severity: high
+    category: metadata
+    confidence: 0.75
+    remediation: "Add all invoked binaries to the requires.bins section of frontmatter."
+    analyzer: metadata_diff
+    check: bins
+
+  - id: SS-META-003
+    title: "Undeclared network calls"
+    description: "Code makes network requests but skill metadata does not declare network access."
+    severity: high
+    category: metadata
+    confidence: 0.70
+    remediation: "Declare network access requirements in skill metadata."
+    analyzer: metadata_diff
+    check: network
